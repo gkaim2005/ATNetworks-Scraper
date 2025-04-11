@@ -33,40 +33,43 @@ def get_product_details(driver, sku):
     driver.get(url)
     try:
         WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((
-                By.CSS_SELECTOR,
-                "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div"
-            ))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div"))
         )
     except Exception:
         return None
-
     product_name = ""
     manufacturer = ""
     part_number = ""
+    upc = ""
+    unspsc = ""
+    main_image = ""
     description = ""
     specifications = ""
-    main_image = ""
-
     try:
-        product_name_elem = driver.find_element(By.CSS_SELECTOR,
-            "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div")
+        product_name_elem = driver.find_element(By.CSS_SELECTOR, "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div")
         product_name = product_name_elem.text.strip()
     except Exception:
         pass
-
     try:
         manufacturer_elem = driver.find_element(By.CSS_SELECTOR, "div#mfr.readonly-text")
         manufacturer = manufacturer_elem.text.strip()
     except Exception:
         pass
-
     try:
         part_number_elem = driver.find_element(By.CSS_SELECTOR, "div#partnum.readonly-text")
         part_number = part_number_elem.text.strip()
     except Exception:
         pass
-
+    try:
+        unspsc_elem = driver.find_element(By.CSS_SELECTOR, "#unspsc")
+        unspsc = unspsc_elem.text.strip()
+    except Exception:
+        pass
+    try:
+        upc_elem = driver.find_element(By.CSS_SELECTOR, "#upc")
+        upc = upc_elem.text.strip()
+    except Exception:
+        pass
     try:
         image_elem = driver.find_element(By.CSS_SELECTOR, "div#product-first-img.product-img")
         style_attr = image_elem.get_attribute("style")
@@ -79,14 +82,35 @@ def get_product_details(driver, sku):
                     main_image = style_attr[start_index:end_index].replace("'", "").replace('"', "").strip()
                     if main_image.startswith("//"):
                         main_image = "https:" + main_image
+                    if main_image == "https://static.channelonline.com/STATICuLYssXMSdO/resources/staticj/img/nopic.jpg":
+                        main_image = ""  # Set to empty string if it's the default no-image URL
     except Exception:
         pass
 
     try:
-        description_elem = driver.find_element(By.CSS_SELECTOR, "div.ccs-ds-textMkt")
-        description = description_elem.text.strip()
+        desc_mkt_elem = driver.find_element(By.CSS_SELECTOR, "div.ccs-ds-textMkt")
+        paragraphs = desc_mkt_elem.find_elements(By.TAG_NAME, "p")
+        desc_paragraph = "\n\n".join(p.text.strip() for p in paragraphs)
     except Exception:
-        pass
+        desc_paragraph = ""
+
+    try:
+        bullets_elem = driver.find_element(By.CSS_SELECTOR, "div.ccs-ds-textKsp")
+        bullet_html = bullets_elem.get_attribute("innerHTML")
+        bullet_soup = BeautifulSoup(bullet_html, "html.parser")
+        bullet_list = [li.get_text(" ", strip=True) for li in bullet_soup.find_all("li")]
+        bullet_text = "\n".join(f"- {item}" for item in bullet_list)
+    except Exception:
+        bullet_text = ""
+
+    if desc_paragraph or bullet_text:
+        description = "Product Description: \n"
+        if desc_paragraph:
+            description += desc_paragraph
+            if bullet_text:
+                description += "\n\n" + bullet_text
+        elif bullet_text:
+            description += bullet_text
 
     try:
         details_elem = driver.find_element(By.CSS_SELECTOR, "div#tab-specs")
@@ -112,11 +136,28 @@ def get_product_details(driver, sku):
     except Exception:
         pass
 
+    try:
+        breadcrumb_elem = driver.find_element(By.CSS_SELECTOR, "#body-main > ol")
+        li_elements = breadcrumb_elem.find_elements(By.TAG_NAME, "li")
+        category_list = []
+        for li in li_elements:
+            txt = li.text.strip()
+            if "Back to Results" in txt:
+                continue
+            if txt:
+                category_list.append(txt)
+        full_category = " / ".join(category_list)
+    except Exception:
+        full_category = ""
+
     return {
         "SKU": sku,
         "Product Name": product_name,
+        "Category": full_category,
         "Manufacturer": manufacturer,
-        "Part Number": part_number,
+        "Part #": part_number,
+        "UNSPSC Code": unspsc,
+        "UPC": upc,
         "Main Image": main_image,
         "Description": description,
         "Specifications": specifications
@@ -139,7 +180,18 @@ def process_sku(sku):
 def main():
     category_file = "categories_ATNetworks.txt"
     output_file = "products_ATNetworks.csv"
-    base_fields = ["SKU", "Product Name", "Category", "Manufacturer", "Part Number", "Main Image", "Description", "Specifications"]
+    base_fields = [
+        "SKU",
+        "Product Name",
+        "Category",
+        "Manufacturer",
+        "Part #",
+        "UNSPSC Code",
+        "UPC",
+        "Main Image",
+        "Description",
+        "Specifications"
+    ]
     with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=base_fields, quoting=csv.QUOTE_ALL)
         writer.writeheader()
@@ -175,14 +227,13 @@ def main():
                         print("No products found on this page. Ending pagination for this category.")
                         break
                     results_page = []
-                    with ThreadPoolExecutor(max_workers=9) as executor:
+                    with ThreadPoolExecutor(max_workers=8) as executor:
                         futures = {executor.submit(process_sku, sku): sku for sku in skus}
                         for future in as_completed(futures):
                             sku = futures[future]
                             try:
                                 product_data = future.result()
                                 if product_data is not None:
-                                    product_data["Category"] = category_name
                                     results_page.append(product_data)
                                     print(f"Data for SKU {sku} saved.")
                                 else:
@@ -203,8 +254,8 @@ def main():
                         WebDriverWait(driver, 10).until(EC.staleness_of(old_product))
                         time.sleep(1)
                         page += 1
-                    except Exception as e:
-                        print("No further pages found or error navigating to next page:", e)
+                    except Exception:
+                        print("No further pages found. Moving to next category.")
                         break
             finally:
                 driver.quit()
