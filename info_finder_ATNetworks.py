@@ -9,18 +9,15 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# Helper function to scrape product SKUs from the current page.
 def scrape_current_page(driver):
     skus = []
     try:
-        # Wait until product links are present.
         WebDriverWait(driver, 15).until(
             EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[href*='/Products/overview/']"))
         )
         product_elements = driver.find_elements(By.CSS_SELECTOR, "a[href*='/Products/overview/']")
         print(f"Found {len(product_elements) // 2} product links on current page.")
         for elem in product_elements:
-            # Only count the element if it is visible.
             if elem.is_displayed():
                 href = elem.get_attribute("href")
                 if "/Products/overview/" in href:
@@ -28,11 +25,9 @@ def scrape_current_page(driver):
                     skus.append(sku)
     except Exception as e:
         print("Error scraping current page:", e)
-    # Remove duplicates.
     unique_skus = list(set(skus))
     return unique_skus
 
-# Function to retrieve product details given a SKU.
 def get_product_details(driver, sku):
     url = f"https://www.atnetworks.com/Products/overview/{sku}"
     driver.get(url)
@@ -44,7 +39,7 @@ def get_product_details(driver, sku):
             ))
         )
     except Exception:
-        return None  # Product not found
+        return None
 
     product_name = ""
     manufacturer = ""
@@ -127,7 +122,6 @@ def get_product_details(driver, sku):
         "Specifications": specifications
     }
 
-# Function to process a single SKU using a separate driver instance.
 def process_sku(sku):
     chrome_options = Options()
     chrome_options.add_argument("--headless")
@@ -142,33 +136,21 @@ def process_sku(sku):
         driver.quit()
     return data
 
-# Main function: Process each category, scrape pages one by one,
-# process the products on each page concurrently, add category information, and append to CSV.
 def main():
-    category_file = "categories_ATNetworks.txt"  # File with category URLs (one per line)
+    category_file = "categories_ATNetworks.txt"
     output_file = "products_ATNetworks.csv"
-    
-    # Define CSV fields (added Category after Product Name).
     base_fields = ["SKU", "Product Name", "Category", "Manufacturer", "Part Number", "Main Image", "Description", "Specifications"]
-    
-    # Open CSV for writing.
     with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=base_fields, quoting=csv.QUOTE_ALL)
         writer.writeheader()
-        
-        # Read category URLs.
         with open(category_file, "r", encoding="utf-8") as f:
             category_urls = [line.strip() for line in f if line.strip()]
-        
-        # Process each category.
         for category_url in category_urls:
-            # Extract category name from the URL using the "cn1" query parameter.
             parsed_url = urllib.parse.urlparse(category_url)
             params = urllib.parse.parse_qs(parsed_url.query)
             category_name = params.get("cn1", [None])[0]
             if not category_name:
-                category_name = category_url  # Fallback if parameter not found.
-                
+                category_name = category_url
             print(f"\nProcessing category: {category_name}")
             chrome_options = Options()
             chrome_options.add_argument("--headless")
@@ -176,18 +158,15 @@ def main():
             driver = webdriver.Chrome(options=chrome_options)
             try:
                 driver.get(category_url)
-                
-                # Force the page to display 50 results.
                 try:
                     WebDriverWait(driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "#number-results-50"))
                     )
                     driver.execute_script("document.querySelector('#number-results-50').click();")
                     print("Set results per page to 50.")
-                    time.sleep(2)  # Allow time for the page to refresh.
+                    time.sleep(2)
                 except Exception as e:
                     print("Could not set results per page:", e)
-                
                 page = 1
                 while True:
                     print(f"\nScraping page {page} of {category_name}")
@@ -195,8 +174,6 @@ def main():
                     if not skus:
                         print("No products found on this page. Ending pagination for this category.")
                         break
-                    
-                    # Process the SKUs concurrently.
                     results_page = []
                     with ThreadPoolExecutor(max_workers=9) as executor:
                         futures = {executor.submit(process_sku, sku): sku for sku in skus}
@@ -205,7 +182,6 @@ def main():
                             try:
                                 product_data = future.result()
                                 if product_data is not None:
-                                    # Add category name info to the product record.
                                     product_data["Category"] = category_name
                                     results_page.append(product_data)
                                     print(f"Data for SKU {sku} saved.")
@@ -213,19 +189,14 @@ def main():
                                     print(f"SKU {sku} skipped.")
                             except Exception as e:
                                 print(f"Error processing SKU {sku}: {e}")
-                    
-                    # Write this page’s results to CSV.
                     for product in results_page:
                         writer.writerow(product)
                     csvfile.flush()
                     print(f"Page {page}: Written {len(results_page)} records to CSV.")
-                    
-                    # Attempt to navigate to the next page.
                     try:
                         next_page = page + 1
                         next_button = driver.find_element(By.XPATH, f"//a[contains(@href, 'navigateToPage({next_page})')]")
                         print(f"Navigating to page {next_page}")
-                        # Capture a reference to a visible product element on the current page.
                         old_product = driver.find_element(By.CSS_SELECTOR, "a[href*='/Products/overview/']")
                         driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
                         driver.execute_script("arguments[0].click();", next_button)
