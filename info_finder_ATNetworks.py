@@ -1,6 +1,8 @@
 import csv
 import time
 import urllib.parse
+import tempfile
+import random
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from selenium import webdriver
@@ -28,145 +30,153 @@ def scrape_current_page(driver):
     unique_skus = list(set(skus))
     return unique_skus
 
-def get_product_details(driver, sku):
+def get_product_details(driver, sku, retries=3, delay=5):
     url = f"https://www.atnetworks.com/Products/overview/{sku}"
-    driver.get(url)
-    try:
-        WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div"))
-        )
-    except Exception:
-        return None
-    product_name = ""
-    manufacturer = ""
-    part_number = ""
-    upc = ""
-    unspsc = ""
-    main_image = ""
-    description = ""
-    specifications = ""
-    try:
-        product_name_elem = driver.find_element(By.CSS_SELECTOR, "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div")
-        product_name = product_name_elem.text.strip()
-    except Exception:
-        pass
-    try:
-        manufacturer_elem = driver.find_element(By.CSS_SELECTOR, "div#mfr.readonly-text")
-        manufacturer = manufacturer_elem.text.strip()
-    except Exception:
-        pass
-    try:
-        part_number_elem = driver.find_element(By.CSS_SELECTOR, "div#partnum.readonly-text")
-        part_number = part_number_elem.text.strip()
-    except Exception:
-        pass
-    try:
-        unspsc_elem = driver.find_element(By.CSS_SELECTOR, "#unspsc")
-        unspsc = unspsc_elem.text.strip()
-    except Exception:
-        pass
-    try:
-        upc_elem = driver.find_element(By.CSS_SELECTOR, "#upc")
-        upc = upc_elem.text.strip()
-    except Exception:
-        pass
-    try:
-        image_elem = driver.find_element(By.CSS_SELECTOR, "div#product-first-img.product-img")
-        style_attr = image_elem.get_attribute("style")
-        if style_attr:
-            start_index = style_attr.find("url(")
-            if start_index != -1:
-                start_index += len("url(")
-                end_index = style_attr.find(")", start_index)
-                if end_index != -1:
-                    main_image = style_attr[start_index:end_index].replace("'", "").replace('"', "").strip()
-                    if main_image.startswith("//"):
-                        main_image = "https:" + main_image
-                    if main_image == "https://static.channelonline.com/STATICuLYssXMSdO/resources/staticj/img/nopic.jpg":
-                        main_image = ""  # Set to empty string if it's the default no-image URL
-    except Exception:
-        pass
+    for attempt in range(retries):
+        try:
+            driver.get(url)
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div"))
+            )
+            # Scraping code goes here...
+            product_name = ""
+            manufacturer = ""
+            part_number = ""
+            upc = ""
+            unspsc = ""
+            main_image = ""
+            description = ""
+            specifications = ""
+            try:
+                product_name_elem = driver.find_element(By.CSS_SELECTOR, "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div")
+                product_name = product_name_elem.text.strip()
+            except Exception:
+                pass
+            try:
+                manufacturer_elem = driver.find_element(By.CSS_SELECTOR, "div#mfr.readonly-text")
+                manufacturer = manufacturer_elem.text.strip()
+            except Exception:
+                pass
+            try:
+                part_number_elem = driver.find_element(By.CSS_SELECTOR, "div#partnum.readonly-text")
+                part_number = part_number_elem.text.strip()
+            except Exception:
+                pass
+            try:
+                unspsc_elem = driver.find_element(By.CSS_SELECTOR, "#unspsc")
+                unspsc = unspsc_elem.text.strip()
+            except Exception:
+                pass
+            try:
+                upc_elem = driver.find_element(By.CSS_SELECTOR, "#upc")
+                upc = upc_elem.text.strip()
+            except Exception:
+                pass
+            try:
+                image_elem = driver.find_element(By.CSS_SELECTOR, "div#product-first-img.product-img")
+                style_attr = image_elem.get_attribute("style")
+                if style_attr:
+                    start_index = style_attr.find("url(")
+                    if start_index != -1:
+                        start_index += len("url(")
+                        end_index = style_attr.find(")", start_index)
+                        if end_index != -1:
+                            main_image = style_attr[start_index:end_index].replace("'", "").replace('"', "").strip()
+                            if main_image.startswith("//"):
+                                main_image = "https:" + main_image
+                            if main_image == "https://static.channelonline.com/STATICuLYssXMSdO/resources/staticj/img/nopic.jpg":
+                                main_image = ""
+            except Exception:
+                pass
 
-    try:
-        desc_mkt_elem = driver.find_element(By.CSS_SELECTOR, "div.ccs-ds-textMkt")
-        paragraphs = desc_mkt_elem.find_elements(By.TAG_NAME, "p")
-        desc_paragraph = "\n\n".join(p.text.strip() for p in paragraphs)
-    except Exception:
-        desc_paragraph = ""
+            try:
+                desc_mkt_elem = driver.find_element(By.CSS_SELECTOR, "div.ccs-ds-textMkt")
+                paragraphs = desc_mkt_elem.find_elements(By.TAG_NAME, "p")
+                desc_paragraph = "\n\n".join(p.text.strip() for p in paragraphs)
+            except Exception:
+                desc_paragraph = ""
 
-    try:
-        bullets_elem = driver.find_element(By.CSS_SELECTOR, "div.ccs-ds-textKsp")
-        bullet_html = bullets_elem.get_attribute("innerHTML")
-        bullet_soup = BeautifulSoup(bullet_html, "html.parser")
-        bullet_list = [li.get_text(" ", strip=True) for li in bullet_soup.find_all("li")]
-        bullet_text = "\n".join(f"- {item}" for item in bullet_list)
-    except Exception:
-        bullet_text = ""
+            try:
+                bullets_elem = driver.find_element(By.CSS_SELECTOR, "div.ccs-ds-textKsp")
+                bullet_html = bullets_elem.get_attribute("innerHTML")
+                bullet_soup = BeautifulSoup(bullet_html, "html.parser")
+                bullet_list = [li.get_text(" ", strip=True) for li in bullet_soup.find_all("li")]
+                bullet_text = "\n".join(f"- {item}" for item in bullet_list)
+            except Exception:
+                bullet_text = ""
 
-    if desc_paragraph or bullet_text:
-        description = "Product Description: \n"
-        if desc_paragraph:
-            description += desc_paragraph
-            if bullet_text:
-                description += "\n\n" + bullet_text
-        elif bullet_text:
-            description += bullet_text
+            if desc_paragraph or bullet_text:
+                description = "Product Description: \n"
+                if desc_paragraph:
+                    description += desc_paragraph
+                    if bullet_text:
+                        description += "\n\n" + bullet_text
+                elif bullet_text:
+                    description += bullet_text
 
-    try:
-        details_elem = driver.find_element(By.CSS_SELECTOR, "div#tab-specs")
-        soup = BeautifulSoup(details_elem.get_attribute("outerHTML"), "html.parser")
-        specs_table = soup.select_one("div#product-specs > table.costandard")
-        if specs_table:
-            tbodies = specs_table.find_all("tbody")
-            current_section = "General"
-            for tbody in tbodies:
-                th = tbody.find("th")
-                if th:
-                    current_section = th.get_text(strip=True)
-                    section_text = ""
-                rows = tbody.find_all("tr")
-                for row in rows:
-                    cells = row.find_all("td")
-                    if len(cells) == 2:
-                        label = cells[0].get_text(strip=True)
-                        value = cells[1].get_text(strip=True)
-                        section_text += f"{label}: {value}\n"
-                if section_text:
-                    specifications += f"{current_section}:\n{section_text}\n"
-    except Exception:
-        pass
+            try:
+                details_elem = driver.find_element(By.CSS_SELECTOR, "div#tab-specs")
+                soup = BeautifulSoup(details_elem.get_attribute("outerHTML"), "html.parser")
+                specs_table = soup.select_one("div#product-specs > table.costandard")
+                if specs_table:
+                    tbodies = specs_table.find_all("tbody")
+                    current_section = "General"
+                    for tbody in tbodies:
+                        th = tbody.find("th")
+                        if th:
+                            current_section = th.get_text(strip=True)
+                            section_text = ""
+                        rows = tbody.find_all("tr")
+                        for row in rows:
+                            cells = row.find_all("td")
+                            if len(cells) == 2:
+                                label = cells[0].get_text(strip=True)
+                                value = cells[1].get_text(strip=True)
+                                section_text += f"{label}: {value}\n"
+                        if section_text:
+                            specifications += f"{current_section}:\n{section_text}\n"
+            except Exception:
+                pass
 
-    try:
-        breadcrumb_elem = driver.find_element(By.CSS_SELECTOR, "#body-main > ol")
-        li_elements = breadcrumb_elem.find_elements(By.TAG_NAME, "li")
-        category_list = []
-        for li in li_elements:
-            txt = li.text.strip()
-            if "Back to Results" in txt:
-                continue
-            if txt:
-                category_list.append(txt)
-        full_category = " / ".join(category_list)
-    except Exception:
-        full_category = ""
+            try:
+                breadcrumb_elem = driver.find_element(By.CSS_SELECTOR, "#body-main > ol")
+                li_elements = breadcrumb_elem.find_elements(By.TAG_NAME, "li")
+                category_list = []
+                for li in li_elements:
+                    txt = li.text.strip()
+                    if "Back to Results" in txt:
+                        continue
+                    if txt:
+                        category_list.append(txt)
+                full_category = " / ".join(category_list)
+            except Exception:
+                full_category = ""
 
-    return {
-        "SKU": sku,
-        "Product Name": product_name,
-        "Category": full_category,
-        "Manufacturer": manufacturer,
-        "Part #": part_number,
-        "UNSPSC Code": unspsc,
-        "UPC": upc,
-        "Main Image": main_image,
-        "Description": description,
-        "Specifications": specifications
-    }
+            return {
+                "SKU": sku,
+                "Product Name": product_name,
+                "Category": full_category,
+                "Manufacturer": manufacturer,
+                "Part #": part_number,
+                "UNSPSC Code": unspsc,
+                "UPC": upc,
+                "Main Image": main_image,
+                "Description": description,
+                "Specifications": specifications
+            }
+        except Exception as e:
+            print(f"Attempt {attempt+1} failed for SKU {sku}: {e}")
+            time.sleep(delay)
+    print(f"Skipping SKU {sku} after {retries} attempts.")
+    return None
 
 def process_sku(sku):
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.binary_location = "/usr/bin/google-chrome"
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=chrome_options)
     try:
         data = get_product_details(driver, sku)
@@ -205,8 +215,11 @@ def main():
                 category_name = category_url
             print(f"\nProcessing category: {category_name}")
             chrome_options = Options()
-            chrome_options.add_argument("--headless")
+            chrome_options.binary_location = "/usr/bin/google-chrome"
+            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--disable-dev-shm-usage")
             driver = webdriver.Chrome(options=chrome_options)
             try:
                 driver.get(category_url)
@@ -227,7 +240,7 @@ def main():
                         print("No products found on this page. Ending pagination for this category.")
                         break
                     results_page = []
-                    with ThreadPoolExecutor(max_workers=8) as executor:
+                    with ThreadPoolExecutor(max_workers=32) as executor:  # Increased to 32 workers
                         futures = {executor.submit(process_sku, sku): sku for sku in skus}
                         for future in as_completed(futures):
                             sku = futures[future]
@@ -246,20 +259,15 @@ def main():
                     print(f"Page {page}: Written {len(results_page)} records to CSV.")
                     try:
                         next_page = page + 1
-                        next_button = driver.find_element(By.XPATH, f"//a[contains(@href, 'navigateToPage({next_page})')]")
-                        print(f"Navigating to page {next_page}")
-                        old_product = driver.find_element(By.CSS_SELECTOR, "a[href*='/Products/overview/']")
-                        driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
-                        driver.execute_script("arguments[0].click();", next_button)
-                        WebDriverWait(driver, 10).until(EC.staleness_of(old_product))
-                        time.sleep(1)
-                        page += 1
+                        driver.get(f"{category_url}&page={next_page}")
+                        time.sleep(random.uniform(2.5, 4))
                     except Exception:
-                        print("No further pages found. Moving to next category.")
                         break
+                    page += 1
+            except Exception as e:
+                print(f"Error processing category {category_name}: {e}")
             finally:
                 driver.quit()
-    print(f"\nAll data saved to {output_file}")
 
 if __name__ == "__main__":
     main()
