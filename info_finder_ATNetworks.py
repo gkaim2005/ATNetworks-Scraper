@@ -22,7 +22,7 @@ def scrape_current_page(driver):
         for elem in product_elements:
             if elem.is_displayed():
                 href = elem.get_attribute("href")
-                if "/Products/overview/" in href:
+                if href and "/Products/overview/" in href:
                     sku = href.split("/")[-1]
                     skus.append(sku)
     except Exception as e:
@@ -38,7 +38,6 @@ def get_product_details(driver, sku, retries=3, delay=5):
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "#body-main > div.product-view > div:nth-child(1) > div:nth-child(1) > div"))
             )
-            # Scraping code goes here...
             product_name = ""
             manufacturer = ""
             part_number = ""
@@ -240,7 +239,7 @@ def main():
                         print("No products found on this page. Ending pagination for this category.")
                         break
                     results_page = []
-                    with ThreadPoolExecutor(max_workers=32) as executor:  # Increased to 32 workers
+                    with ThreadPoolExecutor(max_workers=42) as executor:
                         futures = {executor.submit(process_sku, sku): sku for sku in skus}
                         for future in as_completed(futures):
                             sku = futures[future]
