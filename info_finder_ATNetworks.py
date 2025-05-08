@@ -223,16 +223,37 @@ def main():
                         writer.writerow(product)
                     csvfile.flush()
                     print(f"Page {page}: Written {len(results_page)} records to CSV.")
-                    try:
-                        next_page = page + 1
-                        next_button = driver.find_element(By.XPATH, f"//a[contains(@href, 'navigateToPage({next_page})')]")
-                        old_product = driver.find_element(By.CSS_SELECTOR, "a[href*='/Products/overview/']")
-                        driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
-                        driver.execute_script("arguments[0].click();", next_button)
-                        WebDriverWait(driver, 20).until(EC.staleness_of(old_product))
-                        time.sleep(1)
-                        page += 1
-                    except:
+
+                    # --- New: attempt up to 3 times to click "Next Page" with increasing wait ---
+                    next_page = page + 1
+                    success = False
+                    for attempt in range(1, 4):
+                        try:
+                            next_button = driver.find_element(
+                                By.XPATH,
+                                f"//a[contains(@href, 'navigateToPage({next_page})')]"
+                            )
+                            old_product = driver.find_element(
+                                By.CSS_SELECTOR,
+                                "a[href*='/Products/overview/']"
+                            )
+                            driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
+                            driver.execute_script("arguments[0].click();", next_button)
+                            # wait longer on each subsequent attempt (e.g., 10s, 20s, 30s)
+                            wait_time = 10 * attempt
+                            WebDriverWait(driver, wait_time).until(EC.staleness_of(old_product))
+                            time.sleep(1)
+                            page += 1
+                            success = True
+                            break
+                        except Exception as e:
+                            print(f"Attempt {attempt} to load page {next_page} failed: {e}")
+                            if attempt < 3:
+                                # small back-off before retrying
+                                time.sleep(5 * attempt)
+                            else:
+                                print(f"No next page after {attempt} attempts, stopping pagination for this category.")
+                    if not success:
                         break
             finally:
                 driver.quit()
